@@ -15,7 +15,7 @@ from constants import (
     network,
     api_id,
     api_hash,
-    bot_token,
+    # bot_token,
     dtrend_bot_id,
     dtrend_username,
 )
@@ -39,12 +39,16 @@ networks = {"ETH": 0, "BNB": 1, "SOL": 2}
 async def main():
     # Delete config and start new
     dtrend_entity = await client.get_entity(dtrend_username)
-    await client.send_message(dtrend_entity, "/delete")
+    # await client.send_message(dtrend_entity, "/delete")
     # await client.send_message(dtrend_bot_id, "/delete")
-    delete_response = await get_last_message()
-    await handle_start(delete_response)
-    # Handle data input
-    await handle_main()
+
+    async with client.conversation(dtrend_entity) as conv:
+        await conv.send_message("/delete")
+        delete_response = await conv.get_response()
+        await handle_start(delete_response)
+
+        # Handle data input
+        await handle_main()
 
 
 async def handle_main():
@@ -103,6 +107,7 @@ async def handle_start(message: Message):
 
 async def handle_select_position():
     message = await get_last_message()
+    # print("handle_select message", message.text)
     # Check once more if select position succeeded
     if "Select Period" in message.text:
         # Continue to Select Period
@@ -110,7 +115,7 @@ async def handle_select_position():
     # Check if fetched wrong message
     if "Sorry" in message.text:
         # Retry
-        handle_select_position()
+        await handle_select_position()
     # Check the bot's reply and act accordingly
     elif "🟢" in message.reply_markup.rows[0].buttons[0].text:
         # Select Top 3 Guarantee
@@ -203,7 +208,7 @@ def transfer_sol(receiver_address, amount):
     transaction = Transaction(instructions=[instruction], signers=[sender])
 
     result = solana_client.send_transaction(transaction)
-    print(result)
+    print("transaction id", result)
     # Check if the transaction was successful
     if result:
         return True
