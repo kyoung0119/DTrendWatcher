@@ -1,5 +1,5 @@
 - install python modules with
-  python3 -m pip install --upgrade asyncio telethon solathon
+  python3 -m pip install --upgrade asyncio telethon solana
 
 - inside constans.py
   replace 'sender_private_key' with your wallet private key to release SOL
