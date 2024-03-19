@@ -3,13 +3,19 @@ import asyncio
 import re
 import sys
 import configparser
-import threading
+import os
 from telethon import TelegramClient
 from telethon.tl.types import Message
 from telethon.tl.functions.messages import GetBotCallbackAnswerRequest
 from telethon.errors.rpcerrorlist import BotResponseTimeoutError
-from telethon.tl.functions.messages import DeleteMessagesRequest
-from telethon.tl.functions.contacts import DeleteContactsRequest
+from telethon.errors import PhoneNumberBannedError
+from telethon.tl.functions.messages import (
+    DeleteMessagesRequest,
+    DeleteChatRequest,
+    DeleteChatUserRequest,
+)
+from telethon.tl.functions.contacts import DeleteContactsRequest, DeleteByPhonesRequest
+from telethon.tl.functions.chatlists import LeaveChatlistRequest
 
 from solana.rpc.api import Client
 from solana.rpc.types import TxOpts
@@ -138,10 +144,11 @@ async def main(client):
                 return message
             else:
                 print("Unexpected bot reply in handle_start:", message.text)
+                await main(client)
 
         async def handle_select_position(cur_msg):
             message = await get_last_message(cur_msg)
-            # print("handle_select message", message.text)
+            print("handle_select message", message.text)
             # Check if fetched wrong message
             if "Select Period" in message.text:
                 # Continue to Select Period
@@ -150,28 +157,33 @@ async def main(client):
             elif "there are no slots available" in message.text:
                 # Retry
                 print("wrong message, retrying...")
-                await main()
+                await main(client)
             # elif "Send me portal":
             #     print("wrong message, retrying...")
             #     await main()
             while True:
                 try:
-                    # Check the bot's reply and act accordingly
-                    if "🟢" in message.reply_markup.rows[0].buttons[0].text:
-                        # Select Top 3 Guarantee
-                        await select_option(message, 0, 0)
-                        # print(message.reply_markup.rows[0].buttons[0].text)
-                        break
-                    elif "🟢" in message.reply_markup.rows[0].buttons[1].text:
-                        # Select Top 8 Guarantee
-                        await select_option(message, 0, 1)
-                        # print(message.reply_markup.rows[0].buttons[1].text)
-                        break
+                    # Check if reply_markup is not None
+                    if message.reply_markup:
+                        # Check the bot's reply and act accordingly
+                        if "🟢" in message.reply_markup.rows[0].buttons[0].text:
+                            # Select Top 3 Guarantee
+                            await select_option(message, 0, 0)
+                            # print(message.reply_markup.rows[0].buttons[0].text)
+                            break
+                        elif "🟢" in message.reply_markup.rows[0].buttons[1].text:
+                            # Select Top 8 Guarantee
+                            await select_option(message, 0, 1)
+                            # print(message.reply_markup.rows[0].buttons[1].text)
+                            break
+                        else:
+                            # Select Any Position
+                            await select_option(message, 1, 0)
+                            # print(message.reply_markup.rows[1].buttons[0].text)
+                            break
                     else:
-                        # Select Any Position
-                        await select_option(message, 1, 0)
-                        # print(message.reply_markup.rows[1].buttons[0].text)
-                        break
+                        print("No reply markup found in message. retrying...")
+                        await main(client)
                 except BotResponseTimeoutError:
                     print(
                         "Bot response timeout error occurred in Select Position, retrying"
@@ -244,7 +256,8 @@ async def main(client):
                 in message.text
             ):
                 print("beaten!, retrying...")
-                await main()
+                # await main(client)
+                sys.exit()
 
             else:
                 # Start over from network selection
@@ -254,7 +267,7 @@ async def main(client):
                     await handle_confirm_order_response(retry_message)
                 else:
                     print("no use! retrying!")
-                    await main()
+                    await main(client)
 
         async def handle_check_payment(payment_message):
             while True:
@@ -267,11 +280,14 @@ async def main(client):
                             check_payment_response_id
                         )
                         await handle_check_payment(payment_message)
-                    if "until you get refund" in check_payment_response.text:
+                    elif (
+                        "send me your wallet to get your money back"
+                        in check_payment_response.text
+                    ):
                         print("sending wallet address for refund")
                         await client.send_message(dtrend_bot_id, sender.pubkey())
                         sys.exit()
-                    if "Payment Received at" in check_payment_response.text:
+                    elif "Payment Received at" in check_payment_response.text:
                         print("payment checked!")
                         sys.exit()
 
@@ -291,7 +307,9 @@ async def main(client):
             # while True:
             #     try:
             #         await client(
-            #             GetBotCallbackAnswerRequest(dtrend_bot_id, message.id, data=option)
+            #             GetBotCallbackAnswerRequest(
+            #                 dtrend_bot_id, message.id, data=option
+            #             )
             #         )
             #     except BotResponseTimeoutError:
             #         print(
@@ -322,20 +340,19 @@ async def main(client):
             # Delete config and start new
 
         dtrend_entity = await client.get_entity(config[6])
-        delete_msg = await client.send_message(dtrend_bot_id, "/delete")
-        delete_response = await get_last_message(delete_msg)
-        current_msg = await handle_start(delete_response)
-        # Handle data input
-        await handle_main(current_msg)
+        # delete_msg = await client.send_message(dtrend_bot_id, "/delete")
+        # delete_response = await get_last_message(delete_msg)
+        # current_msg = await handle_start(delete_response)
+        # # Handle data input
+        # await handle_main(current_msg)
 
-        # async with client.conversation(dtrend_entity) as conv:
-        #     await conv.send_message("/delete")
-        #     await client.send_message("DTrend_Bot", delete_msg)
-        #     delete_response = await conv.get_response()
-        #     current_msg = await handle_start(delete_response)
+        async with client.conversation(dtrend_entity) as conv:
+            await conv.send_message("/delete")
+            delete_response = await conv.get_response()
+            current_msg = await handle_start(delete_response)
 
-        #     # Handle data input
-        #     await handle_main(current_msg)
+            # Handle data input
+            await handle_main(current_msg)
 
 
 # Function to transfer SOL to the specified wallet address
@@ -375,23 +392,63 @@ def transfer_sol(receiver_address, amount):
 #     client.loop.run_until_complete(main())
 
 
-async def start_account(session_name, phone_number, api_id, api_hash):
-    client = TelegramClient(session_name, api_id, api_hash)
+# async def start_account(session_name, phone_number, api_id, api_hash):
+#     client = TelegramClient(session_name, api_id, api_hash)
+#     await client.connect()
+#     try:
+#         await client.send_code_request(phone=phone_number)
+#         await client.sign_in(
+#             phone=phone_number, code=input(f"Input confirm code for {session_name}:")
+#         )
+#         if session_name == "account1":
+#             # await client.start(phone=phone_number)
+#             delete_msg = "/delete/" + config[3] + dtrend_username
+#             # await client.send_message(dtrend_entity, "/delete")
+#             # await client.send_message(dtrend_bot_id, "/delete")
+#             delete_message = await client.send_message("letho0119", delete_msg)
+#             message_id = delete_message.id
+#             await client(DeleteMessagesRequest(id=[message_id]))
+#             await client(DeleteContactsRequest(id=["letho0119"]))
+#         await main(client)
+#     except PhoneNumberBannedError:
+#         print(
+#             f"The phone number {phone_number} has been banned from Telegram. Skipping."
+#         )
+#         return
+
+
+# async def start_multi_account():
+#     tasks = []
+#     for section in account_config.sections():
+#         phone_number = account_config[section]["phone_number"]
+#         session_name = account_config[section]["session_name"]
+#         tasks.append(start_account(session_name, phone_number, api_id, api_hash))
+#     await asyncio.gather(*tasks)
+
+
+async def start_account(session_name, session_names):
+    client = TelegramClient(f"sessions/{session_name}", api_id, api_hash)
     await client.connect()
-    await client.send_code_request(phone=phone_number)
-    await client.sign_in(
-        phone=phone_number, code=input(f"Input confirm code for {session_name}:")
-    )
-    # await client.start(phone=phone_number)
-    await main(client)
+    try:
+        # await client.send_code_request(phone=phone_number)
+        # await client.sign_in(
+        #     phone=phone_number, code=input(f"Input confirm code for {session_name}:")
+        # )
+
+        await main(client)
+    except PhoneNumberBannedError:
+        print(f"The session {session_name} has been banned from Telegram. Skipping.")
+        return
 
 
 async def start_multi_account():
     tasks = []
-    for section in account_config.sections():
-        phone_number = account_config[section]["phone_number"]
-        session_name = account_config[section]["session_name"]
-        tasks.append(start_account(session_name, phone_number, api_id, api_hash))
+    session_names = []
+    session_files = os.listdir("sessions/")
+    for session_file in session_files:
+        session_name = session_file.replace(".session", "")
+        session_names.append(session_name)
+        tasks.append(start_account(session_name, session_names))
     await asyncio.gather(*tasks)
 
 

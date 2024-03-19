@@ -3,3 +3,4 @@ test.py
 sol_sweep.py
 *.session
 *.session-journal
+/__pycache__
